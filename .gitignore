@@ -18,3 +18,4 @@ manual/_build/
 *.csv
 .vscode/*
 tests/resources/*
+.DS_Store
