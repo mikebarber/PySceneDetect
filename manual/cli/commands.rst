@@ -64,21 +64,32 @@ copyright information for each component.
 Usage Examples
 -----------------------------------------------------------------------
 
-The ``help`` command:
+``help`` command (show help for global options/command):
 
     ``scenedetect help``
 
+    ``scenedetect help detect-adaptive``
+
     ``scenedetect help all``
 
-    ``scenedetect help detect-content``
-
-The ``about`` command:
+``about`` command (show license/copyright info):
 
     ``scenedetect about``
 
-The ``version`` command:
+``version`` command (show software or system version info):
 
     ``scenedetect version``
+
+    ``scenedetect version --all``
+
+System Dependencies
+-----------------------------------------------------------------------
+
+You can use the ``version`` command with  ``-a`` / ``--all`` to check installed software dependencies:
+
+    ``scenedetect version --all``
+
+Please include this information when submitting bug reports.
 
 
 .. _time Command:
@@ -199,9 +210,12 @@ Command Options
   -f, --filename NAME   Filename format, *without* extension, to use when
                         saving image files. You can use the $VIDEO_NAME,
                         $SCENE_NUMBER, $IMAGE_NUMBER, and $FRAME_NUMBER macros
-                        in the file name. Note that you may have to wrap the
-                        format in single quotes. [default: $VIDEO_NAME-
-                        Scene-$SCENE_NUMBER-$IMAGE_NUMBER]
+                        in the file name. Note that depending on the specifics
+                        of your computing environment, non-standard characters
+                        in image filenames may not be preserved due to an OpenCV
+                        issue. Also note that you may have to wrap the format in
+                        single quotes. [default: $VIDEO_NAME-Scene-
+                        $SCENE_NUMBER-$IMAGE_NUMBER]
 
   -n, --num-images N    Number of images to generate. Will always include
                         start/end frame, unless N = 1, in which case the image
@@ -261,19 +275,26 @@ Command Options
                             global option -o/--output if set.
 
   -f, --filename NAME       File name format to use when saving videos (with
-                            or without extension). You can use the $VIDEO_NAME
-                            and $SCENE_NUMBER macros in the filename (e.g.
-                            $VIDEO_NAME-Part-$SCENE_NUMBER). Note that you may
-                            have to wrap the format in single quotes to avoid
-                            variable expansion. [default: $VIDEO_NAME-
-                            Scene-$SCENE_NUMBER]
+                            or without extension). You can use the $VIDEO_NAME 
+                            or $SCENE_NUMBER macros. Additional macros that are 
+                            available only with the ffmpeg backend include 
+                            $START_TIME, $END_TIME, $START_FRAME, and 
+                            $END_FRAME. A potential formatting pitfall is that 
+                            macros cannot be followed by an underscore character
+                             in order to be replaced correctly. For example, the
+                             value Scene-$SCENE_NUMBER-Frame-$FRAME_NUMBER will 
+                            properly replace both macro values. However, using 
+                            Scene_$SCENE_NUMBER_Frame_$FRAME_NUMBER will not. 
+                            Note that you may have to wrap the format in single 
+                            quotes to avoid variable expansion. [default: 
+                            $VIDEO_NAME-Scene-$SCENE_NUMBER]
 
   -q, --quiet               Hides any output from the external video splitting
                             tool. [setting: off]
 
   -c, --copy                Copy instead of re-encode. Much faster, but less
-                            precise. Equivalent to specifying -a "-c:v copy
-                            -c:a copy".
+                            precise. Equivalent to specifying -a "-map 0 -c:v
+                            copy -c:a copy ".
 
   -hq, --high-quality       Encode video with higher quality, overrides -f
                             option if present. Equivalent to specifying
@@ -294,8 +315,8 @@ Command Options
                             when splitting and re-encoding scenes. Use double
                             quotes (") around specified arguments. Must
                             specify at least audio/video codec to use (e.g. -a
-                            "-c:v [...] -c:a [...]"). [default: -c:v libx264
-                            -preset veryfast -crf 22 -c:a aac]
+                            "-c:v [...] -c:a [...]"). [default: -map 0 -c:v
+                            libx264 -preset veryfast -crf 22 -c:a aac]
 
   -m, --mkvmerge            Split the video using mkvmerge. Faster than re-
                             encoding, but less precise. The output will be
