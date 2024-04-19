@@ -1,10 +1,23 @@
+# CodeQL for PySceneDetect
 name: "CodeQL"
 
 on:
   push:
-    branches: [ "master" ]
+    branches:
+     - main
+     - develop
+     - releases/**
+    paths:
+      - scenedetect/**
+      - tests/**
   pull_request:
-    branches: [ "master" ]
+    branches:
+     - main
+     - develop
+     - releases/*
+    paths:
+      - scenedetect/**
+      - tests/**
   schedule:
     - cron: "20 7 * * 4"
 
@@ -24,7 +37,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v2

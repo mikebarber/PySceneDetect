@@ -1,21 +1,22 @@
 # -*- coding: utf-8 -*-
 #
-#         PySceneDetect: Python-Based Video Scene Detector
-#   ---------------------------------------------------------------
-#     [  Site:   http://www.scenedetect.scenedetect.com/         ]
-#     [  Docs:   http://manual.scenedetect.scenedetect.com/      ]
-#     [  Github: https://github.com/Breakthrough/PySceneDetect/  ]
+#            PySceneDetect: Python-Based Video Scene Detector
+#   -------------------------------------------------------------------
+#     [  Site:    https://scenedetect.com                           ]
+#     [  Docs:    https://scenedetect.com/docs/                     ]
+#     [  Github:  https://github.com/Breakthrough/PySceneDetect/    ]
 #
-# Copyright (C) 2014-2022 Brandon Castellano <http://www.bcastell.com>.
+# Copyright (C) 2014-2024 Brandon Castellano <http://www.bcastell.com>.
 # PySceneDetect is licensed under the BSD 3-Clause License; see the
 # included LICENSE file, or visit one of the above pages for details.
 #
-""":py:class:`ThresholdDetector` uses a set intensity as a threshold to detect cuts, which are
+""":class:`ThresholdDetector` uses a set intensity as a threshold to detect cuts, which are
 triggered when the average pixel intensity exceeds or falls below this threshold.
 
 This detector is available from the command-line as the `detect-threshold` command.
 """
 
+from enum import Enum
 from logging import getLogger
 from typing import List, Optional
 
@@ -30,7 +31,7 @@ logger = getLogger('pyscenedetect')
 ##
 
 
-def compute_frame_average(frame: numpy.ndarray) -> float:
+def _compute_frame_average(frame: numpy.ndarray) -> float:
     """Computes the average pixel value/intensity for all pixels in a frame.
 
     The value is computed by adding up the 8-bit R, G, and B values for
@@ -59,7 +60,14 @@ class ThresholdDetector(SceneDetector):
     is chosen (especially taking into account the minimum grey/black level).
     """
 
-    THRESHOLD_VALUE_KEY = 'delta_rgb'
+    class Method(Enum):
+        """Method for ThresholdDetector to use when comparing frame brightness to the threshold."""
+        FLOOR = 0
+        """Fade out happens when frame brightness falls below threshold."""
+        CEILING = 1
+        """Fade out happens when frame brightness rises above threshold."""
+
+    THRESHOLD_VALUE_KEY = 'average_rgb'
 
     def __init__(
         self,
@@ -67,6 +75,7 @@ class ThresholdDetector(SceneDetector):
         min_scene_len: int = 15,
         fade_bias: float = 0.0,
         add_final_scene: bool = False,
+        method: Method = Method.FLOOR,
         block_size=None,
     ):
         """
@@ -81,6 +90,7 @@ class ThresholdDetector(SceneDetector):
                 right at the position where the threshold is passed).
             add_final_scene:  Boolean indicating if the video ends on a fade-out to
                 generate an additional scene at this timecode.
+            method: How to treat `threshold` when detecting fade events.
             block_size: [DEPRECATED] DO NOT USE. For backwards compatibility.
         """
         # TODO(v0.7): Replace with DeprecationWarning that `block_size` will be removed in v0.8.
@@ -89,6 +99,7 @@ class ThresholdDetector(SceneDetector):
 
         super().__init__()
         self.threshold = int(threshold)
+        self.method = ThresholdDetector.Method(method)
         self.fade_bias = fade_bias
         self.min_scene_len = min_scene_len
         self.processed_frame = False
@@ -106,13 +117,14 @@ class ThresholdDetector(SceneDetector):
     def get_metrics(self) -> List[str]:
         return self._metric_keys
 
-    def process_frame(self, frame_num: int, frame_img: Optional[numpy.ndarray]) -> List[int]:
-        """
+    def process_frame(self, frame_num: int, frame_img: numpy.ndarray) -> List[int]:
+        """Process the next frame. `frame_num` is assumed to be sequential.
+
         Args:
-            frame_num (int): Frame number of frame that is being passed.
-            frame_img (numpy.ndarray or None): Decoded frame image (numpy.ndarray) to perform
-                scene detection with. Can be None *only* if the self.is_processing_required()
-                method (inhereted from the base SceneDetector class) returns True.
+            frame_num (int): Frame number of frame that is being passed. Can start from any value
+                but must remain sequential.
+            frame_img (numpy.ndarray or None): Video frame corresponding to `frame_img`.
+
         Returns:
             List[int]: List of frames where scene cuts have been detected. There may be 0
             or more frames in the list, and not necessarily the same as frame_num.
@@ -137,16 +149,21 @@ class ThresholdDetector(SceneDetector):
                 frame_num, self._metric_keys)):
             frame_avg = self.stats_manager.get_metrics(frame_num, self._metric_keys)[0]
         else:
-            frame_avg = compute_frame_average(frame_img)
+            frame_avg = _compute_frame_average(frame_img)
             if self.stats_manager is not None:
                 self.stats_manager.set_metrics(frame_num, {self._metric_keys[0]: frame_avg})
 
         if self.processed_frame:
-            if self.last_fade['type'] == 'in' and frame_avg < self.threshold:
+            if self.last_fade['type'] == 'in' and ((
+                (self.method == ThresholdDetector.Method.FLOOR and frame_avg < self.threshold) or
+                (self.method == ThresholdDetector.Method.CEILING and frame_avg >= self.threshold))):
                 # Just faded out of a scene, wait for next fade in.
                 self.last_fade['type'] = 'out'
                 self.last_fade['frame'] = frame_num
-            elif self.last_fade['type'] == 'out' and frame_avg >= self.threshold:
+
+            elif self.last_fade['type'] == 'out' and (
+                (self.method == ThresholdDetector.Method.FLOOR and frame_avg >= self.threshold) or
+                (self.method == ThresholdDetector.Method.CEILING and frame_avg < self.threshold)):
                 # Only add the scene if min_scene_len frames have passed.
                 if (frame_num - self.last_scene_cut) >= self.min_scene_len:
                     # Just faded into a new scene, compute timecode for the scene

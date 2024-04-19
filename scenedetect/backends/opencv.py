@@ -1,22 +1,20 @@
 # -*- coding: utf-8 -*-
 #
-#         PySceneDetect: Python-Based Video Scene Detector
-#   ---------------------------------------------------------------
-#     [  Site:   http://www.scenedetect.scenedetect.com/         ]
-#     [  Docs:   http://manual.scenedetect.scenedetect.com/      ]
-#     [  Github: https://github.com/Breakthrough/PySceneDetect/  ]
+#            PySceneDetect: Python-Based Video Scene Detector
+#   -------------------------------------------------------------------
+#     [  Site:    https://scenedetect.com                           ]
+#     [  Docs:    https://scenedetect.com/docs/                     ]
+#     [  Github:  https://github.com/Breakthrough/PySceneDetect/    ]
 #
-# Copyright (C) 2014-2022 Brandon Castellano <http://www.bcastell.com>.
+# Copyright (C) 2014-2024 Brandon Castellano <http://www.bcastell.com>.
 # PySceneDetect is licensed under the BSD 3-Clause License; see the
 # included LICENSE file, or visit one of the above pages for details.
 #
-""":py:class:`VideoStreamCv2` provides an adapter for the OpenCV `cv2.VideoCapture` object. Works
-with video files, image sequences, and network streams/URLs.
+""":class:`VideoStreamCv2` is backed by the OpenCV `VideoCapture` object. This is the default
+backend. Works with video files, image sequences, and network streams/URLs.
 
-Uses string identifier ``'opencv'``.
-
-For wrapping input devices or pipes, there is also the :py:class:`VideoCaptureAdapter` which can
-be created from an existing `cv2.VideoCapture`. This allows performing scene detection on inputs
+For wrapping input devices or pipes, there is also :class:`VideoCaptureAdapter` which can be
+constructed from an existing `cv2.VideoCapture`. This allows performing scene detection on inputs
 which do not support seeking.
 """
 
@@ -26,7 +24,7 @@ from typing import AnyStr, Tuple, Union, Optional
 import os.path
 
 import cv2
-from numpy import ndarray
+import numpy as np
 
 from scenedetect.frame_timecode import FrameTimecode, MAX_FPS_DELTA
 from scenedetect.platform import get_file_name
@@ -43,7 +41,7 @@ NON_VIDEO_FILE_INPUT_IDENTIFIERS = (
 )
 
 
-def get_aspect_ratio(cap: cv2.VideoCapture, epsilon: float = 0.0001) -> float:
+def _get_aspect_ratio(cap: cv2.VideoCapture, epsilon: float = 0.0001) -> float:
     """Display/pixel aspect ratio of the VideoCapture as a float (1.0 represents square pixels)."""
     # Versions of OpenCV < 3.4.1 do not support this, so we fall back to 1.0.
     if not 'CAP_PROP_SAR_NUM' in dir(cv2):
@@ -185,7 +183,7 @@ class VideoStreamCv2(VideoStream):
     @property
     def aspect_ratio(self) -> float:
         """Display/pixel aspect ratio as a float (1.0 represents square pixels)."""
-        return get_aspect_ratio(self._cap)
+        return _get_aspect_ratio(self._cap)
 
     @property
     def position(self) -> FrameTimecode:
@@ -264,8 +262,8 @@ class VideoStreamCv2(VideoStream):
         self._cap.release()
         self._open_capture(self._frame_rate)
 
-    def read(self, decode: bool = True, advance: bool = True) -> Union[ndarray, bool]:
-        """Read and decode the next frame as a numpy.ndarray. Returns False when video ends,
+    def read(self, decode: bool = True, advance: bool = True) -> Union[np.ndarray, bool]:
+        """Read and decode the next frame as a np.ndarray. Returns False when video ends,
         or the maximum number of decode attempts has passed.
 
         Arguments:
@@ -273,7 +271,7 @@ class VideoStreamCv2(VideoStream):
             advance: Seek to the next frame. If False, will return the current (last) frame.
 
         Returns:
-            If decode = True, the decoded frame (numpy.ndarray), or False (bool) if end of video.
+            If decode = True, the decoded frame (np.ndarray), or False (bool) if end of video.
             If decode = False, a bool indicating if advancing to the the next frame succeeded.
         """
         if not self._cap.isOpened():
@@ -323,8 +321,7 @@ class VideoStreamCv2(VideoStream):
         cap = cv2.VideoCapture(self._path_or_device)
         if not cap.isOpened():
             raise VideoOpenFailure(
-                'VideoCapture.isOpened() returned False. Ensure the input file is a valid video,'
-                ' and check that OpenCV is installed correctly.\n')
+                'Ensure file is valid video and system dependencies are up to date.\n')
 
         # Display an error if the video codec type seems unsupported (#86) as this indicates
         # potential video corruption, or may explain missing frames. We only perform this check
@@ -452,17 +449,20 @@ class VideoCaptureAdapter(VideoStream):
 
     @property
     def duration(self) -> Optional[FrameTimecode]:
-        """Always None, as the underlying VideoCapture is assumed to not have a known duration."""
-        None
+        """Duration of the stream as a FrameTimecode, or None if non terminating."""
+        frame_count = math.trunc(self._cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if frame_count > 0:
+            return self.base_timecode + frame_count
+        return None
 
     @property
     def aspect_ratio(self) -> float:
         """Display/pixel aspect ratio as a float (1.0 represents square pixels)."""
-        return get_aspect_ratio(self._cap)
+        return _get_aspect_ratio(self._cap)
 
     @property
     def position(self) -> FrameTimecode:
-        """Current position within stream as FrameTimecode. Use the :py:meth:`position_ms`
+        """Current position within stream as FrameTimecode. Use the :meth:`position_ms`
         if an accurate duration of elapsed time is required, as `position` is currently
         based off of the number of frames, and may not be accurate for devicesor live streams.
 
@@ -500,8 +500,8 @@ class VideoCaptureAdapter(VideoStream):
         """Not supported."""
         raise NotImplementedError("Reset is not supported.")
 
-    def read(self, decode: bool = True, advance: bool = True) -> Union[ndarray, bool]:
-        """Read and decode the next frame as a numpy.ndarray. Returns False when video ends,
+    def read(self, decode: bool = True, advance: bool = True) -> Union[np.ndarray, bool]:
+        """Read and decode the next frame as a np.ndarray. Returns False when video ends,
         or the maximum number of decode attempts has passed.
 
         Arguments:
@@ -509,7 +509,7 @@ class VideoCaptureAdapter(VideoStream):
             advance: Seek to the next frame. If False, will return the current (last) frame.
 
         Returns:
-            If decode = True, the decoded frame (numpy.ndarray), or False (bool) if end of video.
+            If decode = True, the decoded frame (np.ndarray), or False (bool) if end of video.
             If decode = False, a bool indicating if advancing to the the next frame succeeded.
         """
         if not self._cap.isOpened():

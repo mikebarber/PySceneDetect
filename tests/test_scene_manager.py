@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 #
-#         PySceneDetect: Python-Based Video Scene Detector
-#   ---------------------------------------------------------------
-#     [  Site:   http://www.scenedetect.scenedetect.com/         ]
-#     [  Docs:   http://manual.scenedetect.scenedetect.com/      ]
-#     [  Github: https://github.com/Breakthrough/PySceneDetect/  ]
+#            PySceneDetect: Python-Based Video Scene Detector
+#   -------------------------------------------------------------------
+#     [  Site:    https://scenedetect.com                           ]
+#     [  Docs:    https://scenedetect.com/docs/                     ]
+#     [  Github:  https://github.com/Breakthrough/PySceneDetect/    ]
 #
-# Copyright (C) 2014-2022 Brandon Castellano <http://www.bcastell.com>.
+# Copyright (C) 2014 Brandon Castellano <http://www.bcastell.com>.
 # PySceneDetect is licensed under the BSD 3-Clause License; see the
 # included LICENSE file, or visit one of the above pages for details.
 #
@@ -48,12 +48,16 @@ def test_scene_list(test_video_file):
 
     num_frames = sm.detect_scenes(video=video, end_time=end_time)
 
-    assert num_frames == (1 + end_time.get_frames() - start_time.get_frames())
+    assert num_frames == (end_time.get_frames() - start_time.get_frames())
 
     scene_list = sm.get_scene_list()
     assert scene_list
     # Each scene is in the format (Start Timecode, End Timecode)
     assert len(scene_list[0]) == 2
+
+    # First scene should start at start_time and last scene should end at end_time.
+    assert scene_list[0][0] == start_time
+    assert scene_list[-1][1] == end_time
 
     for i, _ in enumerate(scene_list):
         assert scene_list[i][0].get_frames() < scene_list[i][1].get_frames()
@@ -94,16 +98,8 @@ def test_save_images(test_video_file):
 
     try:
         video_fps = video.frame_rate
-        start_time = FrameTimecode('00:00:05', video_fps)
-        end_time = FrameTimecode('00:00:15', video_fps)
-
-        video.seek(start_time)
-        sm.auto_downscale = True
-
-        sm.detect_scenes(video=video, end_time=end_time)
-
-        scene_list = sm.get_scene_list()
-        assert scene_list
+        scene_list = [(FrameTimecode(start, video_fps), FrameTimecode(end, video_fps))
+                      for start, end in [(0, 100), (200, 300), (300, 400)]]
 
         image_filenames = save_images(
             scene_list=scene_list,
@@ -121,6 +117,36 @@ def test_save_images(test_video_file):
 
         assert total_images == len(glob.glob(image_name_glob))
 
+    finally:
+        for path in glob.glob(image_name_glob):
+            os.remove(path)
+
+
+# TODO: Test other functionality against zero width scenes.
+def test_save_images_zero_width_scene(test_video_file):
+    """Test scenedetect.scene_manager.save_images guards against zero width scenes."""
+    video = VideoStreamCv2(test_video_file)
+    image_name_glob = 'scenedetect.tempfile.*.jpg'
+    image_name_template = 'scenedetect.tempfile.$SCENE_NUMBER.$IMAGE_NUMBER'
+    try:
+        video_fps = video.frame_rate
+        scene_list = [(FrameTimecode(start, video_fps), FrameTimecode(end, video_fps))
+                      for start, end in [(0, 0), (1, 1), (2, 3)]]
+        NUM_IMAGES = 10
+        image_filenames = save_images(
+            scene_list=scene_list,
+            video=video,
+            num_images=10,
+            image_extension='jpg',
+            image_name_template=image_name_template)
+        assert len(image_filenames) == 3
+        assert all(len(image_filenames[scene]) == NUM_IMAGES for scene in image_filenames)
+        total_images = 0
+        for scene_number in image_filenames:
+            for path in image_filenames[scene_number]:
+                assert os.path.exists(path)
+                total_images += 1
+        assert total_images == len(glob.glob(image_name_glob))
     finally:
         for path in glob.glob(image_name_glob):
             os.remove(path)

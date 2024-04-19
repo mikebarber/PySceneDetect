@@ -5,13 +5,10 @@ PySceneDetect
 Video Scene Cut Detection and Analysis Tool
 ----------------------------------------------------------
 
-.. image:: https://img.shields.io/travis/com/Breakthrough/PySceneDetect
-   :target: https://travis-ci.com/github/Breakthrough/PySceneDetect
-
-.. image:: https://img.shields.io/github/release/Breakthrough/PySceneDetect.svg
+.. image:: https://img.shields.io/pypi/status/scenedetect.svg
    :target: https://github.com/Breakthrough/PySceneDetect
 
-.. image:: https://img.shields.io/pypi/status/scenedetect.svg
+.. image:: https://img.shields.io/github/release/Breakthrough/PySceneDetect.svg
    :target: https://github.com/Breakthrough/PySceneDetect
 
 .. image:: https://img.shields.io/pypi/l/scenedetect.svg
@@ -22,26 +19,30 @@ Video Scene Cut Detection and Analysis Tool
 
 ----------------------------------------------------------
 
-Website: http://scenedetect.com/
-
-Documentation: http://manual.scenedetect.com/
+Documentation: https://www.scenedetect.com/docs
 
 Github Repo: https://github.com/Breakthrough/PySceneDetect/
 
-----------------------------------------------------------
-
-PySceneDetect is a command-line tool and Python library which analyzes a video, looking for scene changes or cuts.  PySceneDetect integrates with external tools (e.g. `mkvmerge`, `ffmpeg`) to automatically split the video into individual clips when using the `split-video` command.  A frame-by-frame analysis can also be generated for a video, called a stats file, to help with determining optimal threshold values or detecting patterns/other analysis methods for a particular video.
-
-There are two main detection methods PySceneDetect uses: `detect-threshold` (comparing each frame to a set black level, useful for detecting cuts and fades to/from black), and `detect-content` (compares each frame sequentially looking for changes in content, useful for detecting fast cuts between video scenes, although slower to process).  Each mode has slightly different parameters, and is described in detail in the documentation.
-
-In general, use `detect-threshold` mode if you want to detect scene boundaries using fades/cuts in/out to black.  If the video uses a lot of fast cuts between content, and has no well-defined scene boundaries, you should use the `detect-content` mode.  Once you know what detection mode to use, you can try the parameters recommended below, or generate a statistics file (using the `-s` / `--stats` argument) in order to determine the correct paramters - specifically, the proper threshold value.
-
-For help or other issues, feel free to submit any bugs or feature requests to Github: https://github.com/Breakthrough/PySceneDetect/issues
+Install: ``pip install --upgrade scenedetect[opencv]``
 
 ----------------------------------------------------------
 
-Licensed under BSD 3-Clause (see the `LICENSE` file for details).
+**PySceneDetect** is a tool for detecting shot changes in videos, and can automatically split videos into separate clips.  PySceneDetect is free and open-source software, and has several detection methods to find fast-cuts and threshold-based fades.
 
-Copyright (C) 2014-2022 Brandon Castellano.
+For example, to split a video: ``scenedetect -i video.mp4 split-video``
+
+You can also use the Python API (`docs <https://www.scenedetect.com/docs/latest/>`_) to do the same:
+
+.. code-block:: python
+
+    from scenedetect import detect, AdaptiveDetector, split_video_ffmpeg
+    scene_list = detect('my_video.mp4', AdaptiveDetector())
+    split_video_ffmpeg('my_video.mp4', scene_list)
+
+----------------------------------------------------------
+
+Licensed under BSD 3-Clause (see the ``LICENSE`` file for details).
+
+Copyright (C) 2014-2024 Brandon Castellano.
 All rights reserved.
 
