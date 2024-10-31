@@ -144,6 +144,7 @@ def default_formatter(template: str) -> PathFormatter:
         END_TIME=str(scene.end.get_timecode().replace(":", ";")),
         START_FRAME=str(scene.start.get_frames()),
         END_FRAME=str(scene.end.get_frames()),
+        NUMBER_FRAMES=str(scene.end.get_frames()-scene.start.get_frames())
     )
     return formatter
 
