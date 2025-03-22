@@ -23,6 +23,7 @@ import logging
 import os
 import os.path
 import typing as ty
+from copy import deepcopy
 
 import click
 
@@ -46,15 +47,15 @@ from scenedetect.detectors import (
 )
 from scenedetect.platform import get_cv2_imwrite_params, get_system_version_info
 
-_PROGRAM_VERSION = scenedetect.__version__
+PROGRAM_VERSION = scenedetect.__version__
 """Used to avoid name conflict with named `scenedetect` command below."""
 
 logger = logging.getLogger("pyscenedetect")
 
-_LINE_SEPARATOR = "-" * 72
+LINE_SEPARATOR = "-" * 72
 
 # About & copyright message string shown for the 'about' CLI command (scenedetect about).
-_ABOUT_STRING = """
+ABOUT_STRING = """
 Site: http://scenedetect.com/
 Docs: https://www.scenedetect.com/docs/
 Code: https://github.com/Breakthrough/PySceneDetect/
@@ -88,7 +89,7 @@ THE SOFTWARE IS PROVIDED "AS IS" WITHOUT ANY WARRANTY, EXPRESS OR IMPLIED.
 """
 
 
-class _Command(click.Command):
+class Command(click.Command):
     """Custom formatting for commands."""
 
     def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
@@ -96,14 +97,14 @@ class _Command(click.Command):
         if ctx.parent:
             formatter.write(click.style("`%s` Command" % ctx.command.name, fg="cyan"))
             formatter.write_paragraph()
-            formatter.write(click.style(_LINE_SEPARATOR, fg="cyan"))
+            formatter.write(click.style(LINE_SEPARATOR, fg="cyan"))
             formatter.write_paragraph()
         else:
-            formatter.write(click.style(_LINE_SEPARATOR, fg="yellow"))
+            formatter.write(click.style(LINE_SEPARATOR, fg="yellow"))
             formatter.write_paragraph()
             formatter.write(click.style("PySceneDetect Help", fg="yellow"))
             formatter.write_paragraph()
-            formatter.write(click.style(_LINE_SEPARATOR, fg="yellow"))
+            formatter.write(click.style(LINE_SEPARATOR, fg="yellow"))
             formatter.write_paragraph()
 
         self.format_usage(ctx, formatter)
@@ -130,13 +131,13 @@ class _Command(click.Command):
             formatter.write_text(epilog)
 
 
-class _CommandGroup(_Command, click.Group):
+class CommandGroup(Command, click.Group):
     """Custom formatting for command groups."""
 
     pass
 
 
-def _print_command_help(ctx: click.Context, command: click.Command):
+def print_command_help(ctx: click.Context, command: click.Command):
     """Print help/usage for a given command. Modifies `ctx` in-place."""
     ctx.info_name = command.name
     ctx.command = command
@@ -144,12 +145,40 @@ def _print_command_help(ctx: click.Context, command: click.Command):
     click.echo(command.get_help(ctx))
 
 
+SCENEDETECT_COMMAND_HELP = """PySceneDetect is a scene cut/transition detection program. PySceneDetect takes an input video, runs detection on it, and uses the resulting scene information to generate output. The syntax for using PySceneDetect is:
+
+    {scenedetect_with_video} [detector] [commands]
+
+For [detector] use `detect-adaptive` or `detect-content` to find fast cuts, and `detect-threshold` for fades in/out. If [detector] is not specified, a default detector will be used.
+
+Examples:
+
+Split video wherever a new scene is detected:
+
+    {scenedetect_with_video} split-video
+
+Save scene list in CSV format with images at the start, middle, and end of each scene:
+
+    {scenedetect_with_video} list-scenes save-images
+
+Skip the first 10 seconds of the input video:
+
+    {scenedetect_with_video} time --start 10s detect-content
+
+Show summary of all options and commands:
+
+    {scenedetect} --help
+
+Global options (e.g. -i/--input, -c/--config) must be specified before any commands and their options. The order of commands is not strict, but each command must only be specified once."""
+
+
 @click.group(
-    cls=_CommandGroup,
+    cls=CommandGroup,
     chain=True,
     context_settings=dict(help_option_names=["-h", "--help"]),
     invoke_without_command=True,
     epilog="""Type "scenedetect [command] --help" for command usage. See https://scenedetect.com/docs/ for online docs.""",
+    help=SCENEDETECT_COMMAND_HELP,
 )
 # *NOTE*: Although input is required, we cannot mark it as `required=True`, otherwise we will reject
 # commands of the form `scenedetect detect-content --help`.
@@ -200,7 +229,7 @@ def _print_command_help(ctx: click.Context, command: click.Command):
     metavar="TIMECODE",
     type=click.STRING,
     default=None,
-    help="Minimum length of any scene. TIMECODE can be specified as number of frames (-m=10), time in seconds (-m=2.5), or timecode (-m=00:02:53.633).%s"
+    help="Minimum length of any scene. TIMECODE can be specified as number of frames (-m 10), time in seconds (-m 2.5), or timecode (-m 00:02:53.633).%s"
     % USER_CONFIG.get_help_string("global", "min-scene-len"),
 )
 @click.option(
@@ -229,12 +258,20 @@ def _print_command_help(ctx: click.Context, command: click.Command):
     % (", ".join(AVAILABLE_BACKENDS.keys()), USER_CONFIG.get_help_string("global", "backend")),
 )
 @click.option(
+    "--crop",
+    metavar="X0 Y0 X1 Y1",
+    type=(int, int, int, int),
+    default=None,
+    help="Crop input video. Specified as two points representing top left and bottom right corner of crop region. 0 0 is top-left of the video frame. Bounds are inclusive (e.g. for a 100x100 video, the region covering the whole frame is 0 0 99 99).%s"
+    % (USER_CONFIG.get_help_string("global", "crop", show_default=False)),
+)
+@click.option(
     "--downscale",
     "-d",
     metavar="N",
     type=click.INT,
     default=None,
-    help="Integer factor to downscale video by before processing. If unset, value is selected based on resolution. Set -d=1 to disable downscaling.%s"
+    help="Integer factor to downscale video by before processing. If unset, value is selected based on resolution. Set -d 1 to disable downscaling.%s"
     % (USER_CONFIG.get_help_string("global", "downscale", show_default=False)),
 )
 @click.option(
@@ -243,7 +280,7 @@ def _print_command_help(ctx: click.Context, command: click.Command):
     metavar="N",
     type=click.INT,
     default=None,
-    help="Skip N frames during processing. Reduces processing speed at expense of accuracy. -fs=1 skips every other frame processing 50%% of the video, -fs=2 processes 33%% of the video frames, -fs=3 processes 25%%, etc... %s"
+    help="Skip N frames during processing. Reduces processing speed at expense of accuracy. -fs 1 skips every other frame processing 50%% of the video, -fs 2 processes 33%% of the video frames, -fs 3 processes 25%%, etc... %s"
     % USER_CONFIG.get_help_string("global", "frame-skip"),
 )
 @click.option(
@@ -284,38 +321,13 @@ def scenedetect(
     drop_short_scenes: ty.Optional[bool],
     merge_last_scene: ty.Optional[bool],
     backend: ty.Optional[str],
+    crop: ty.Optional[ty.Tuple[int, int, int, int]],
     downscale: ty.Optional[int],
     frame_skip: ty.Optional[int],
     verbosity: ty.Optional[str],
     logfile: ty.Optional[ty.AnyStr],
     quiet: bool,
 ):
-    """PySceneDetect is a scene cut/transition detection program. PySceneDetect takes an input video, runs detection on it, and uses the resulting scene information to generate output. The syntax for using PySceneDetect is:
-
-        {scenedetect_with_video} [detector] [commands]
-
-    For [detector] use `detect-adaptive` or `detect-content` to find fast cuts, and `detect-threshold` for fades in/out. If [detector] is not specified, a default detector will be used.
-
-    Examples:
-
-    Split video wherever a new scene is detected:
-
-        {scenedetect_with_video} split-video
-
-    Save scene list in CSV format with images at the start, middle, and end of each scene:
-
-        {scenedetect_with_video} list-scenes save-images
-
-    Skip the first 10 seconds of the input video:
-
-        {scenedetect_with_video} time --start 10s detect-content
-
-    Show summary of all options and commands:
-
-        {scenedetect} --help
-
-    Global options (e.g. -i/--input, -c/--config) must be specified before any commands and their options. The order of commands is not strict, but each command must only be specified once.
-    """
     ctx = ctx.obj
     assert isinstance(ctx, CliContext)
 
@@ -324,12 +336,13 @@ def scenedetect(
         output=output,
         framerate=framerate,
         stats_file=stats,
-        downscale=downscale,
         frame_skip=frame_skip,
         min_scene_len=min_scene_len,
         drop_short_scenes=drop_short_scenes,
         merge_last_scene=merge_last_scene,
         backend=backend,
+        crop=crop,
+        downscale=downscale,
         quiet=quiet,
         logfile=logfile,
         config=config,
@@ -338,7 +351,14 @@ def scenedetect(
     )
 
 
-@click.command("help", cls=_Command)
+def add_hidden_alias(command: click.Command, alias: str):
+    """Adds a copy of `command` that can be invoked under the name `alias`."""
+    hidden_command = deepcopy(command)
+    hidden_command.hidden = True
+    scenedetect.add_command(hidden_command, alias)
+
+
+@click.command("help", cls=Command)
 @click.argument(
     "command_name",
     required=False,
@@ -346,7 +366,8 @@ def scenedetect(
 )
 @click.pass_context
 def help_command(ctx: click.Context, command_name: str):
-    """Print help for command (`help [command]`)."""
+    """Print full help reference."""
+    # TODO: Other commands still seem to run if this is specified.
     assert isinstance(ctx.parent.command, click.MultiCommand)
     parent_command = ctx.parent.command
     all_commands = set(parent_command.list_commands(ctx))
@@ -358,27 +379,27 @@ def help_command(ctx: click.Context, command_name: str):
             ]
             raise click.BadParameter("\n".join(error_strs), param_hint="command")
         click.echo("")
-        _print_command_help(ctx, parent_command.get_command(ctx, command_name))
+        print_command_help(ctx, parent_command.get_command(ctx, command_name))
     else:
         click.echo(ctx.parent.get_help())
         for command in sorted(all_commands):
-            _print_command_help(ctx, parent_command.get_command(ctx, command))
+            print_command_help(ctx, parent_command.get_command(ctx, command))
     ctx.exit()
 
 
-@click.command("about", cls=_Command, add_help_option=False)
+@click.command("about", cls=Command, add_help_option=False)
 @click.pass_context
 def about_command(ctx: click.Context):
     """Print license/copyright info."""
     click.echo("")
-    click.echo(click.style(_LINE_SEPARATOR, fg="cyan"))
-    click.echo(click.style(" About PySceneDetect %s" % _PROGRAM_VERSION, fg="yellow"))
-    click.echo(click.style(_LINE_SEPARATOR, fg="cyan"))
-    click.echo(_ABOUT_STRING)
+    click.echo(click.style(LINE_SEPARATOR, fg="cyan"))
+    click.echo(click.style(" About PySceneDetect %s" % PROGRAM_VERSION, fg="yellow"))
+    click.echo(click.style(LINE_SEPARATOR, fg="cyan"))
+    click.echo(ABOUT_STRING)
     ctx.exit()
 
 
-@click.command("version", cls=_Command, add_help_option=False)
+@click.command("version", cls=Command, add_help_option=False)
 @click.pass_context
 def version_command(ctx: click.Context):
     """Print PySceneDetect version."""
@@ -387,7 +408,21 @@ def version_command(ctx: click.Context):
     ctx.exit()
 
 
-@click.command("time", cls=_Command)
+TIME_COMMAND_HELP = """Set start/end/duration of input video.
+
+Values can be specified as seconds (SSSS.nn), frames (NNNN), or timecode (HH:MM:SS.nnn). For example, to process only the first minute of a video:
+
+    {scenedetect_with_video} time --end 00:01:00
+
+    {scenedetect_with_video} time --duration 60.0
+
+Note that --end and --duration are mutually exclusive (i.e. only one of the two can be set). Lastly, the following is an example using absolute frame numbers to process frames 0 through 1000:
+
+    {scenedetect_with_video} time --start 0 --end 1000
+"""
+
+
+@click.command("time", cls=Command, help=TIME_COMMAND_HELP)
 @click.option(
     "--start",
     "-s",
@@ -419,18 +454,6 @@ def time_command(
     duration: ty.Optional[str],
     end: ty.Optional[str],
 ):
-    """Set start/end/duration of input video.
-
-    Values can be specified as seconds (SSSS.nn), frames (NNNN), or timecode (HH:MM:SS.nnn). For example, to process only the first minute of a video:
-
-        {scenedetect_with_video} time --end 00:01:00
-
-        {scenedetect_with_video} time --duration 60.0
-
-    Note that --end and --duration are mutually exclusive (i.e. only one of the two can be set). Lastly, the following is an example using absolute frame numbers to process frames 0 through 1000:
-
-        {scenedetect_with_video} time --start 0 --end 1000
-    """
     ctx = ctx.obj
     assert isinstance(ctx, CliContext)
 
@@ -450,7 +473,31 @@ def time_command(
         raise click.BadParameter("-e/--end time must be greater than -s/--start")
 
 
-@click.command("detect-content", cls=_Command)
+DETECT_CONTENT_HELP = """Find fast cuts using differences in HSL (filtered).
+
+For each frame, a score from 0 to 255.0 is calculated which represents the difference in content between the current and previous frame (higher = more different). A cut is generated when a frame score exceeds -t/--threshold. Frame scores are saved under the "content_val" column in a statsfile.
+
+Scores are calculated from several components which are also recorded in the statsfile:
+
+  - *delta_hue*: Difference between pixel hue values of adjacent frames.
+
+  - *delta_sat*: Difference between pixel saturation values of adjacent frames.
+
+  - *delta_lum*: Difference between pixel luma (brightness) values of adjacent frames.
+
+  - *delta_edges*: Difference between calculated edges of adjacent frames. Typically larger than other components, so threshold may need to be increased to compensate.
+
+Once calculated, these components are multiplied by the specified -w/--weights to calculate the final frame score ("content_val").  Weights are set as a set of 4 numbers in the form (*delta_hue*, *delta_sat*, *delta_lum*, *delta_edges*). For example, "--weights 1.0 0.5 1.0 0.2 --threshold 32" is a good starting point for trying edge detection. The final sum is normalized by the weight of all components, so they need not equal 100%. Edge detection is disabled by default to improve performance.
+
+Examples:
+
+    {scenedetect_with_video} detect-content
+
+    {scenedetect_with_video} detect-content --threshold 27.5
+"""
+
+
+@click.command("detect-content", cls=Command, help=DETECT_CONTENT_HELP)
 @click.option(
     "--threshold",
     "-t",
@@ -477,7 +524,7 @@ def time_command(
     "-l",
     is_flag=True,
     flag_value=True,
-    help='Only use luma (brightness) channel. Useful for greyscale videos. Equivalent to setting -w="0 0 1 0".%s'
+    help="Only use luma (brightness) channel. Useful for greyscale videos. Equivalent to setting -w 0 0 1 0.%s"
     % (USER_CONFIG.get_help_string("detect-content", "luma-only")),
 )
 @click.option(
@@ -524,28 +571,6 @@ def detect_content_command(
     min_scene_len: ty.Optional[str],
     filter_mode: ty.Optional[str],
 ):
-    """Find fast cuts using differences in HSL (filtered).
-
-    For each frame, a score from 0 to 255.0 is calculated which represents the difference in content between the current and previous frame (higher = more different). A cut is generated when a frame score exceeds -t/--threshold. Frame scores are saved under the "content_val" column in a statsfile.
-
-    Scores are calculated from several components which are also recorded in the statsfile:
-
-     - *delta_hue*: Difference between pixel hue values of adjacent frames.
-
-     - *delta_sat*: Difference between pixel saturation values of adjacent frames.
-
-     - *delta_lum*: Difference between pixel luma (brightness) values of adjacent frames.
-
-     - *delta_edges*: Difference between calculated edges of adjacent frames. Typically larger than other components, so threshold may need to be increased to compensate.
-
-    Once calculated, these components are multiplied by the specified -w/--weights to calculate the final frame score ("content_val").  Weights are set as a set of 4 numbers in the form (*delta_hue*, *delta_sat*, *delta_lum*, *delta_edges*). For example, "--weights 1.0 0.5 1.0 0.2 --threshold 32" is a good starting point for trying edge detection. The final sum is normalized by the weight of all components, so they need not equal 100%. Edge detection is disabled by default to improve performance.
-
-    Examples:
-
-        {scenedetect_with_video} detect-content
-
-        {scenedetect_with_video} detect-content --threshold 27.5
-    """
     ctx = ctx.obj
     assert isinstance(ctx, CliContext)
     detector_args = ctx.get_detect_content_params(
@@ -559,7 +584,19 @@ def detect_content_command(
     ctx.add_detector(ContentDetector, detector_args)
 
 
-@click.command("detect-adaptive", cls=_Command)
+DETECT_ADAPTIVE_HELP = """Find fast cuts using diffs in HSL colorspace (rolling average).
+
+Two-pass algorithm that first calculates frame scores with `detect-content`, and then applies a rolling average when processing the result. This can help mitigate false detections in situations such as camera movement.
+
+Examples:
+
+    {scenedetect_with_video} detect-adaptive
+
+    {scenedetect_with_video} detect-adaptive --threshold 3.2
+"""
+
+
+@click.command("detect-adaptive", cls=Command, help=DETECT_ADAPTIVE_HELP)
 @click.option(
     "--threshold",
     "-t",
@@ -628,7 +665,7 @@ def detect_content_command(
     metavar="TIMECODE",
     type=click.STRING,
     default=None,
-    help="Minimum length of any scene. Overrides global option -m/--min-scene-len. TIMECODE can be specified in frames (-m=100), in seconds with `s` suffix (-m=3.5s), or timecode (-m=00:01:52.778).%s"
+    help="Minimum length of any scene. Overrides global option -m/--min-scene-len. TIMECODE can be specified in frames (-m 100), in seconds with `s` suffix (-m 3.5s), or timecode (-m 00:01:52.778).%s"
     % (
         ""
         if USER_CONFIG.is_default("detect-adaptive", "min-scene-len")
@@ -647,16 +684,6 @@ def detect_adaptive_command(
     kernel_size: ty.Optional[int],
     min_scene_len: ty.Optional[str],
 ):
-    """Find fast cuts using diffs in HSL colorspace (rolling average).
-
-    Two-pass algorithm that first calculates frame scores with `detect-content`, and then applies a rolling average when processing the result. This can help mitigate false detections in situations such as camera movement.
-
-    Examples:
-
-        {scenedetect_with_video} detect-adaptive
-
-        {scenedetect_with_video} detect-adaptive --threshold 3.2
-    """
     ctx = ctx.obj
     assert isinstance(ctx, CliContext)
     detector_args = ctx.get_detect_adaptive_params(
@@ -672,7 +699,19 @@ def detect_adaptive_command(
     ctx.add_detector(AdaptiveDetector, detector_args)
 
 
-@click.command("detect-threshold", cls=_Command)
+DETECT_THRESHOLD_HELP = """Find fade in/out using averaging.
+
+Detects fade-in and fade-out events using average pixel values. Resulting cuts are placed between adjacent fade-out and fade-in events.
+
+Examples:
+
+    {scenedetect_with_video} detect-threshold
+
+    {scenedetect_with_video} detect-threshold --threshold 15
+"""
+
+
+@click.command("detect-threshold", cls=Command, help=DETECT_THRESHOLD_HELP)
 @click.option(
     "--threshold",
     "-t",
@@ -711,7 +750,7 @@ def detect_adaptive_command(
     metavar="TIMECODE",
     type=click.STRING,
     default=None,
-    help="Minimum length of any scene. Overrides global option -m/--min-scene-len. TIMECODE can be specified in frames (-m=100), in seconds with `s` suffix (-m=3.5s), or timecode (-m=00:01:52.778).%s"
+    help="Minimum length of any scene. Overrides global option -m/--min-scene-len. TIMECODE can be specified in frames (-m 100), in seconds with `s` suffix (-m 3.5s), or timecode (-m 00:01:52.778).%s"
     % (
         ""
         if USER_CONFIG.is_default("detect-threshold", "min-scene-len")
@@ -726,16 +765,6 @@ def detect_threshold_command(
     add_last_scene: bool,
     min_scene_len: ty.Optional[str],
 ):
-    """Find fade in/out using averaging.
-
-    Detects fade-in and fade-out events using average pixel values. Resulting cuts are placed between adjacent fade-out and fade-in events.
-
-    Examples:
-
-        {scenedetect_with_video} detect-threshold
-
-        {scenedetect_with_video} detect-threshold --threshold 15
-    """
     ctx = ctx.obj
     assert isinstance(ctx, CliContext)
     detector_args = ctx.get_detect_threshold_params(
@@ -747,7 +776,21 @@ def detect_threshold_command(
     ctx.add_detector(ThresholdDetector, detector_args)
 
 
-@click.command("detect-hist", cls=_Command)
+DETECT_HIST_HELP = """Find fast cuts by differencing YUV histograms.
+
+Uses Y channel after converting each frame to YUV to create a histogram of each frame. Histograms between frames are compared to determine a score for how similar they are.
+
+Saved as the `hist_diff` metric in a statsfile.
+
+Examples:
+
+    {scenedetect_with_video} detect-hist
+
+    {scenedetect_with_video} detect-hist --threshold 0.1 --bins 240
+"""
+
+
+@click.command("detect-hist", cls=Command, help=DETECT_HIST_HELP)
 @click.option(
     "--threshold",
     "-t",
@@ -794,18 +837,6 @@ def detect_hist_command(
     bins: ty.Optional[int],
     min_scene_len: ty.Optional[str],
 ):
-    """Find fast cuts by differencing YUV histograms.
-
-    Uses Y channel after converting each frame to YUV to create a histogram of each frame. Histograms between frames are compared to determine a score for how similar they are.
-
-    Saved as the `hist_diff` metric in a statsfile.
-
-    Examples:
-
-        {scenedetect_with_video} detect-hist
-
-        {scenedetect_with_video} detect-hist --threshold 0.1 --bins 240
-    """
     ctx = ctx.obj
     assert isinstance(ctx, CliContext)
     detector_args = ctx.get_detect_hist_params(
@@ -814,7 +845,21 @@ def detect_hist_command(
     ctx.add_detector(HistogramDetector, detector_args)
 
 
-@click.command("detect-hash", cls=_Command)
+DETECT_HASH_HELP = """Find fast cuts using perceptual hashing.
+
+The perceptual hash is taken of adjacent frames, and used to calculate the hamming distance between them. The distance is then normalized by the squared size of the hash, and compared to the threshold.
+
+Saved as the `hash_dist` metric in a statsfile.
+
+Examples:
+
+    {scenedetect_with_video} detect-hash
+
+    {scenedetect_with_video} detect-hash --size 32 --lowpass 3
+"""
+
+
+@click.command("detect-hash", cls=Command, help=DETECT_HASH_HELP)
 @click.option(
     "--threshold",
     "-t",
@@ -877,18 +922,6 @@ def detect_hash_command(
     lowpass: ty.Optional[int],
     min_scene_len: ty.Optional[str],
 ):
-    """Find fast cuts using perceptual hashing.
-
-    The perceptual hash is taken of adjacent frames, and used to calculate the hamming distance between them. The distance is then normalized by the squared size of the hash, and compared to the threshold.
-
-    Saved as the `hash_dist` metric in a statsfile.
-
-    Examples:
-
-        {scenedetect_with_video} detect-hash
-
-        {scenedetect_with_video} detect-hash --size 32 --lowpass 3
-    """
     ctx = ctx.obj
     assert isinstance(ctx, CliContext)
     detector_args = ctx.get_detect_hash_params(
@@ -897,7 +930,17 @@ def detect_hash_command(
     ctx.add_detector(HashDetector, detector_args)
 
 
-@click.command("load-scenes", cls=_Command)
+LOAD_SCENES_HELP = """Load scenes from CSV instead of detecting. Can be used with CSV generated by `list-scenes`. Scenes are loaded using the specified column as cut locations (frame number or timecode).
+
+Examples:
+
+    {scenedetect_with_video} load-scenes -i scenes.csv
+
+    {scenedetect_with_video} load-scenes -i scenes.csv --start-col-name "Start Timecode"
+"""
+
+
+@click.command("load-scenes", cls=Command, help=LOAD_SCENES_HELP)
 @click.option(
     "--input",
     "-i",
@@ -920,14 +963,6 @@ def detect_hash_command(
 def load_scenes_command(
     ctx: click.Context, input: ty.Optional[str], start_col_name: ty.Optional[str]
 ):
-    """Load scenes from CSV instead of detecting. Can be used with CSV generated by `list-scenes`. Scenes are loaded using the specified column as cut locations (frame number or timecode).
-
-    Examples:
-
-        {scenedetect_with_video} load-scenes -i scenes.csv
-
-        {scenedetect_with_video} load-scenes -i scenes.csv --start-col-name "Start Timecode"
-    """
     ctx = ctx.obj
     assert isinstance(ctx, CliContext)
 
@@ -947,7 +982,13 @@ def load_scenes_command(
     )
 
 
-@click.command("export-html", cls=_Command)
+SAVE_HTML_HELP = """Save scene list to HTML file.
+
+To customize image generation, specify the `save-images` command before `save-html`. This command always uses the result of the preceeding `save-images` command, or runs it with the default config values unless `--no-images` is set.
+"""
+
+
+@click.command("save-html", cls=Command, help=SAVE_HTML_HELP)
 @click.option(
     "--filename",
     "-f",
@@ -955,14 +996,15 @@ def load_scenes_command(
     default="$VIDEO_NAME-Scenes.html",
     type=click.STRING,
     help="Filename format to use for the scene list HTML file. You can use the $VIDEO_NAME macro in the file name. Note that you may have to wrap the format name using single quotes.%s"
-    % (USER_CONFIG.get_help_string("export-html", "filename")),
+    % (USER_CONFIG.get_help_string("save-html", "filename")),
 )
 @click.option(
     "--no-images",
+    "-n",
     is_flag=True,
     flag_value=True,
-    help="Export the scene list including or excluding the saved images.%s"
-    % (USER_CONFIG.get_help_string("export-html", "no-images")),
+    help="Do not include images with the result.%s"
+    % (USER_CONFIG.get_help_string("save-html", "no-images")),
 )
 @click.option(
     "--image-width",
@@ -970,7 +1012,7 @@ def load_scenes_command(
     metavar="pixels",
     type=click.INT,
     help="Width in pixels of the images in the resulting HTML table.%s"
-    % (USER_CONFIG.get_help_string("export-html", "image-width", show_default=False)),
+    % (USER_CONFIG.get_help_string("save-html", "image-width", show_default=False)),
 )
 @click.option(
     "--image-height",
@@ -978,40 +1020,66 @@ def load_scenes_command(
     metavar="pixels",
     type=click.INT,
     help="Height in pixels of the images in the resulting HTML table.%s"
-    % (USER_CONFIG.get_help_string("export-html", "image-height", show_default=False)),
+    % (USER_CONFIG.get_help_string("save-html", "image-height", show_default=False)),
+)
+@click.option(
+    "--show",
+    "-s",
+    is_flag=True,
+    flag_value=True,
+    default=None,
+    help="Automatically open resulting HTML when processing is complete.%s"
+    % (USER_CONFIG.get_help_string("save-html", "show")),
 )
 @click.pass_context
-def export_html_command(
+def save_html_command(
     ctx: click.Context,
     filename: ty.Optional[ty.AnyStr],
     no_images: bool,
     image_width: ty.Optional[int],
     image_height: ty.Optional[int],
+    show: bool,
 ):
-    """Export scene list to HTML file. Requires save-images unless --no-images is specified."""
+    if ctx.command.name == "save-html":
+        logger.warning("WARNING: export-html is deprecated, use save-html instead.")
     ctx = ctx.obj
     assert isinstance(ctx, CliContext)
-
-    no_images = no_images or ctx.config.get_value("export-html", "no-images")
-    if not ctx.save_images and not no_images:
-        raise click.BadArgumentUsage(
-            "export-html requires that save-images precedes it or --no-images is specified."
-        )
-    export_html_args = {
-        "html_name_format": ctx.config.get_value("export-html", "filename", filename),
-        "image_width": ctx.config.get_value("export-html", "image-width", image_width),
-        "image_height": ctx.config.get_value("export-html", "image-height", image_height),
+    # Make sure a save-images command is in the pipeline for us to use the results from if we need
+    # to include images.
+    include_images = not ctx.config.get_value("save-html", "no-images", no_images)
+    if include_images and not ctx.save_images:
+        save_images_command.callback()
+    save_html_args = {
+        "filename": ctx.config.get_value("save-html", "filename", filename),
+        "image_width": ctx.config.get_value("save-html", "image-width", image_width),
+        "image_height": ctx.config.get_value("save-html", "image-height", image_height),
+        "no_images": ctx.config.get_value("save-html", "no-images", no_images),
+        "show": ctx.config.get_value("save-html", "show", show),
     }
-    ctx.add_command(cli_commands.export_html, export_html_args)
+    ctx.add_command(cli_commands.save_html, save_html_args)
 
 
-@click.command("list-scenes", cls=_Command)
+LIST_SCENES_HELP = """Create scene list CSV file (will be named $VIDEO_NAME-Scenes.csv by default).
+
+Examples:
+
+Default:
+
+    {scenedetect_with_video} list-scenes
+
+Without cut list (RFC 4180 compliant CSV):
+
+    {scenedetect_with_video} list-scenes --skip-cuts
+"""
+
+
+@click.command("list-scenes", cls=Command, help=LIST_SCENES_HELP)
 @click.option(
     "--output",
     "-o",
     metavar="DIR",
     type=click.Path(exists=False, dir_okay=True, writable=True, resolve_path=False),
-    help="Output directory to save videos to. Overrides global option -o/--output if set.%s"
+    help="Output directory to save videos to. Overrides global option -o/--output.%s"
     % (USER_CONFIG.get_help_string("list-scenes", "output", show_default=False)),
 )
 @click.option(
@@ -1020,7 +1088,7 @@ def export_html_command(
     metavar="NAME",
     default="$VIDEO_NAME-Scenes.csv",
     type=click.STRING,
-    help="Filename format to use for the scene list CSV file. You can use the $VIDEO_NAME macro in the file name. Note that you may have to wrap the name using single quotes or use escape characters (e.g. -f=\\$VIDEO_NAME-Scenes.csv).%s"
+    help="Filename format to use for the scene list CSV file. You can use the $VIDEO_NAME macro in the file name. Note that you may have to wrap the name using single quotes or use escape characters (e.g. -f \\$VIDEO_NAME-Scenes.csv).%s"
     % (USER_CONFIG.get_help_string("list-scenes", "filename")),
 )
 @click.option(
@@ -1058,33 +1126,49 @@ def list_scenes_command(
     quiet: ty.Optional[bool],
     skip_cuts: ty.Optional[bool],
 ):
-    """Create scene list CSV file (will be named $VIDEO_NAME-Scenes.csv by default)."""
     ctx = ctx.obj
     assert isinstance(ctx, CliContext)
 
-    create_file = not ctx.config.get_value("list-scenes", "no-output-file", no_output_file)
-    output_dir = ctx.config.get_value("list-scenes", "output", output)
-    name_format = ctx.config.get_value("list-scenes", "filename", filename)
     list_scenes_args = {
+        "col_separator": ctx.config.get_value("list-scenes", "col-separator"),
         "cut_format": ctx.config.get_value("list-scenes", "cut-format"),
         "display_scenes": ctx.config.get_value("list-scenes", "display-scenes"),
         "display_cuts": ctx.config.get_value("list-scenes", "display-cuts"),
-        "scene_list_output": create_file,
-        "scene_list_name_format": name_format,
+        "no_output_file": ctx.config.get_value("list-scenes", "no-output-file", no_output_file),
+        "filename": ctx.config.get_value("list-scenes", "filename", filename),
         "skip_cuts": ctx.config.get_value("list-scenes", "skip-cuts", skip_cuts),
-        "output_dir": output_dir,
+        "output": ctx.config.get_value("list-scenes", "output", output),
         "quiet": ctx.config.get_value("list-scenes", "quiet", quiet) or ctx.quiet_mode,
+        "row_separator": ctx.config.get_value("list-scenes", "row-separator"),
     }
     ctx.add_command(cli_commands.list_scenes, list_scenes_args)
 
 
-@click.command("split-video", cls=_Command)
+SPLIT_VIDEO_HELP = """Split input video using ffmpeg or mkvmerge.
+
+Examples:
+
+Default:
+
+    {scenedetect_with_video} split-video
+
+Codec-copy mode (not frame accurate):
+
+    {scenedetect_with_video} split-video --copy
+
+Customized filenames:
+
+    {scenedetect_with_video} split-video --filename \\$VIDEO_NAME-Clip-\\$SCENE_NUMBER
+"""
+
+
+@click.command("split-video", cls=Command, help=SPLIT_VIDEO_HELP)
 @click.option(
     "--output",
     "-o",
     metavar="DIR",
     type=click.Path(exists=False, dir_okay=True, writable=True, resolve_path=False),
-    help="Output directory to save videos to. Overrides global option -o/--output if set.%s"
+    help="Output directory to save videos to. Overrides global option -o/--output.%s"
     % (USER_CONFIG.get_help_string("split-video", "output", show_default=False)),
 )
 @click.option(
@@ -1093,7 +1177,7 @@ def list_scenes_command(
     metavar="NAME",
     default=None,
     type=click.STRING,
-    help="File name format to use when saving videos, with or without extension. You can use $VIDEO_NAME and $SCENE_NUMBER macros in the filename. You may have to wrap the format in single quotes or use escape characters to avoid variable expansion (e.g. -f=\\$VIDEO_NAME-Scene-\\$SCENE_NUMBER).%s"
+    help="File name format to use when saving videos, with or without extension. You can use $VIDEO_NAME and $SCENE_NUMBER macros in the filename. You may have to wrap the format in single quotes or use escape characters to avoid variable expansion (e.g. -f \\$VIDEO_NAME-Scene-\\$SCENE_NUMBER).%s"
     % (USER_CONFIG.get_help_string("split-video", "filename")),
 )
 @click.option(
@@ -1175,16 +1259,6 @@ def split_video_command(
     args: ty.Optional[str],
     mkvmerge: bool,
 ):
-    """Split input video using ffmpeg or mkvmerge.
-
-    Examples:
-
-        {scenedetect_with_video} split-video
-
-        {scenedetect_with_video} split-video --copy
-
-        {scenedetect_with_video} split-video --filename \\$VIDEO_NAME-Clip-\\$SCENE_NUMBER
-    """
     ctx = ctx.obj
     assert isinstance(ctx, CliContext)
 
@@ -1246,20 +1320,32 @@ def split_video_command(
     split_video_args = {
         "name_format": ctx.config.get_value("split-video", "filename", filename),
         "use_mkvmerge": mkvmerge,
-        "output_dir": ctx.config.get_value("split-video", "output", output),
+        "output": ctx.config.get_value("split-video", "output", output),
         "show_output": not ctx.config.get_value("split-video", "quiet", quiet),
         "ffmpeg_args": args,
     }
     ctx.add_command(cli_commands.split_video, split_video_args)
 
 
-@click.command("save-images", cls=_Command)
+SAVE_IMAGES_HELP = """Save images from each detected scene.
+
+Examples:
+
+    {scenedetect_with_video} save-images --num-images 5
+
+    {scenedetect_with_video} save-images --width 1024
+
+    {scenedetect_with_video} save-images --filename \\$SCENE_NUMBER-img\\$IMAGE_NUMBER
+"""
+
+
+@click.command("save-images", cls=Command, help=SAVE_IMAGES_HELP)
 @click.option(
     "--output",
     "-o",
     metavar="DIR",
     type=click.Path(exists=False, dir_okay=True, writable=True, resolve_path=False),
-    help="Output directory for images. Overrides global option -o/--output if set.%s"
+    help="Output directory for images. Overrides global option -o/--output.%s"
     % (USER_CONFIG.get_help_string("save-images", "output", show_default=False)),
 )
 @click.option(
@@ -1268,7 +1354,7 @@ def split_video_command(
     metavar="NAME",
     default=None,
     type=click.STRING,
-    help="Filename format *without* extension to use when saving images. You can use the $VIDEO_NAME, $SCENE_NUMBER, $IMAGE_NUMBER, and $FRAME_NUMBER macros in the file name. You may have to use escape characters (e.g. -f=\\$SCENE_NUMBER-Image-\\$IMAGE_NUMBER) or single quotes.%s"
+    help="Filename format *without* extension to use when saving images. You can use the $VIDEO_NAME, $SCENE_NUMBER, $IMAGE_NUMBER, and $FRAME_NUMBER macros in the file name. You may have to use escape characters (e.g. -f \\$SCENE_NUMBER-Image-\\$IMAGE_NUMBER) or single quotes.%s"
     % (USER_CONFIG.get_help_string("save-images", "filename")),
 )
 @click.option(
@@ -1277,7 +1363,7 @@ def split_video_command(
     metavar="N",
     default=None,
     type=click.INT,
-    help="Number of images to generate per scene. Will always include start/end frame, unless -n=1, in which case the image will be the frame at the mid-point of the scene.%s"
+    help="Number of images to generate per scene. Will always include start/end frame, unless -n 1, in which case the image will be the frame at the mid-point of the scene.%s"
     % (USER_CONFIG.get_help_string("save-images", "num-images")),
 )
 @click.option(
@@ -1359,31 +1445,19 @@ def split_video_command(
 @click.pass_context
 def save_images_command(
     ctx: click.Context,
-    output: ty.Optional[ty.AnyStr],
-    filename: ty.Optional[ty.AnyStr],
-    num_images: ty.Optional[int],
-    jpeg: bool,
-    webp: bool,
-    quality: ty.Optional[int],
-    png: bool,
-    compression: ty.Optional[int],
-    frame_margin: ty.Optional[int],
-    scale: ty.Optional[float],
-    height: ty.Optional[int],
-    width: ty.Optional[int],
+    output: ty.Optional[ty.AnyStr] = None,
+    filename: ty.Optional[ty.AnyStr] = None,
+    num_images: ty.Optional[int] = None,
+    jpeg: bool = False,
+    webp: bool = False,
+    quality: ty.Optional[int] = None,
+    png: bool = False,
+    compression: ty.Optional[int] = None,
+    frame_margin: ty.Optional[int] = None,
+    scale: ty.Optional[float] = None,
+    height: ty.Optional[int] = None,
+    width: ty.Optional[int] = None,
 ):
-    """Create images for each detected scene.
-
-    Images can be resized
-
-    Examples:
-
-        {scenedetect_with_video} save-images
-
-        {scenedetect_with_video} save-images --width 1024
-
-        {scenedetect_with_video} save-images --filename \\$SCENE_NUMBER-img\\$IMAGE_NUMBER
-    """
     ctx = ctx.obj
     assert isinstance(ctx, CliContext)
 
@@ -1430,45 +1504,274 @@ def save_images_command(
         "frame_margin": ctx.config.get_value("save-images", "frame-margin", frame_margin),
         "height": height,
         "image_extension": image_extension,
-        "image_name_template": ctx.config.get_value("save-images", "filename", filename),
+        "filename": ctx.config.get_value("save-images", "filename", filename),
         "interpolation": scale_method,
         "num_images": ctx.config.get_value("save-images", "num-images", num_images),
-        "output_dir": output,
+        "output": output,
         "scale": scale,
-        "show_progress": ctx.quiet_mode,
+        "show_progress": not ctx.quiet_mode,
+        "threading": ctx.config.get_value("save-images", "threading"),
         "width": width,
     }
     ctx.add_command(cli_commands.save_images, save_images_args)
 
-    # Record that we added a save-images command to the pipeline so we can allow export-html
+    # Record that we added a save-images command to the pipeline so we can allow save-html
     # to run afterwards (it is dependent on the output).
     ctx.save_images = True
 
 
+SAVE_EDL_HELP = """Save cuts in EDL format (CMX 3600)."""
+
+
+@click.command("save-edl", cls=Command, help=SAVE_EDL_HELP)
+@click.option(
+    "--filename",
+    "-f",
+    metavar="NAME",
+    default=None,
+    type=click.STRING,
+    help="Filename format to use.%s" % (USER_CONFIG.get_help_string("save-edl", "filename")),
+)
+@click.option(
+    "--title",
+    "-t",
+    metavar="NAME",
+    default=None,
+    type=click.STRING,
+    help="Title format to use.%s" % (USER_CONFIG.get_help_string("save-edl", "title")),
+)
+@click.option(
+    "--reel",
+    "-r",
+    metavar="REEL",
+    default=None,
+    type=click.STRING,
+    help="Reel name to use.%s" % (USER_CONFIG.get_help_string("save-edl", "reel")),
+)
+@click.option(
+    "--output",
+    "-o",
+    metavar="DIR",
+    type=click.Path(exists=False, dir_okay=True, writable=True, resolve_path=False),
+    help="Output directory to save EDL file to. Overrides global option -o/--output.%s"
+    % (USER_CONFIG.get_help_string("save-edl", "output", show_default=False)),
+)
+@click.pass_context
+def save_edl_command(
+    ctx: click.Context,
+    filename: ty.Optional[ty.AnyStr],
+    title: ty.Optional[ty.AnyStr],
+    reel: ty.Optional[ty.AnyStr],
+    output: ty.Optional[ty.AnyStr],
+):
+    ctx = ctx.obj
+    assert isinstance(ctx, CliContext)
+
+    save_edl_args = {
+        "filename": ctx.config.get_value("save-edl", "filename", filename),
+        "title": ctx.config.get_value("save-edl", "title", title),
+        "reel": ctx.config.get_value("save-edl", "reel", reel),
+        "output": ctx.config.get_value("save-edl", "output", output),
+    }
+    ctx.add_command(cli_commands.save_edl, save_edl_args)
+
+
+SAVE_QP_HELP = """Save cuts as keyframes (I-frames) for video encoding.
+
+The resulting QP file can be used with the `--qpfile` argument in x264/x265.
+"""
+
+
+@click.command("save-qp", cls=Command, help=SAVE_QP_HELP)
+@click.option(
+    "--filename",
+    "-f",
+    metavar="NAME",
+    default=None,
+    type=click.STRING,
+    help="Filename format to use.%s" % (USER_CONFIG.get_help_string("save-qp", "filename")),
+)
+@click.option(
+    "--output",
+    "-o",
+    metavar="DIR",
+    type=click.Path(exists=False, dir_okay=True, writable=True, resolve_path=False),
+    help="Output directory to save QP file to. Overrides global option -o/--output.%s"
+    % (USER_CONFIG.get_help_string("save-qp", "output", show_default=False)),
+)
+@click.option(
+    "--disable-shift",
+    "-d",
+    is_flag=True,
+    flag_value=True,
+    default=None,
+    help="Disable shifting frame numbers by start time.%s"
+    % (USER_CONFIG.get_help_string("save-qp", "disable-shift")),
+)
+@click.pass_context
+def save_qp_command(
+    ctx: click.Context,
+    filename: ty.Optional[ty.AnyStr],
+    output: ty.Optional[ty.AnyStr],
+    disable_shift: ty.Optional[bool],
+):
+    ctx = ctx.obj
+    assert isinstance(ctx, CliContext)
+
+    save_qp_args = {
+        "filename": ctx.config.get_value("save-qp", "filename", filename),
+        "output": ctx.config.get_value("save-qp", "output", output),
+        "disable_shift": ctx.config.get_value("save-qp", "disable-shift", disable_shift),
+    }
+    ctx.add_command(cli_commands.save_qp, save_qp_args)
+
+
+SAVE_XML_HELP = """[IN DEVELOPMENT] Save cuts in XML format."""
+
+
+@click.command("save-xml", cls=Command, help=SAVE_XML_HELP, hidden=True)
+@click.option(
+    "--filename",
+    "-f",
+    metavar="NAME",
+    default=None,
+    type=click.STRING,
+    help="Filename format to use.%s" % (USER_CONFIG.get_help_string("save-xml", "filename")),
+)
+@click.option(
+    "--format",
+    metavar="TYPE",
+    type=click.Choice(CHOICE_MAP["save-xml"]["format"], False),
+    default=None,
+    help="Format to export. TYPE must be one of: %s.%s"
+    % (
+        ", ".join(CHOICE_MAP["save-xml"]["format"]),
+        USER_CONFIG.get_help_string("save-xml", "format"),
+    ),
+)
+@click.option(
+    "--output",
+    "-o",
+    metavar="DIR",
+    type=click.Path(exists=False, dir_okay=True, writable=True, resolve_path=False),
+    help="Output directory to save XML file to. Overrides global option -o/--output.%s"
+    % (USER_CONFIG.get_help_string("save-xml", "output", show_default=False)),
+)
+@click.pass_context
+def save_xml_command(
+    ctx: click.Context,
+    filename: ty.Optional[ty.AnyStr],
+    format: ty.Optional[ty.AnyStr],
+    output: ty.Optional[ty.AnyStr],
+):
+    ctx = ctx.obj
+    assert isinstance(ctx, CliContext)
+
+    save_xml_args = {
+        "filename": ctx.config.get_value("save-xml", "filename", filename),
+        "format": ctx.config.get_value("save-xml", "format", format),
+        "output": ctx.config.get_value("save-xml", "output", output),
+    }
+    ctx.add_command(cli_commands.save_xml, save_xml_args)
+
+
+SAVE_OTIO_HELP = """Save cuts as an OTIO timeline.
+
+Uses the Timeline.1 schema. OTIO (OpenTimelineIO) timelines can be imported by many video editors."""
+
+
+@click.command("save-otio", cls=Command, help=SAVE_OTIO_HELP)
+@click.option(
+    "--filename",
+    "-f",
+    metavar="NAME",
+    default=None,
+    type=click.STRING,
+    help="Filename format to use.%s" % (USER_CONFIG.get_help_string("save-otio", "filename")),
+)
+@click.option(
+    "--name",
+    "-n",
+    metavar="NAME",
+    default=None,
+    type=click.STRING,
+    help="Name of timeline to use.%s" % (USER_CONFIG.get_help_string("save-otio", "name")),
+)
+@click.option(
+    "--output",
+    "-o",
+    metavar="DIR",
+    type=click.Path(exists=False, dir_okay=True, writable=True, resolve_path=False),
+    help="Output directory to save OTIO file to. Overrides global option -o/--output.%s"
+    % (USER_CONFIG.get_help_string("save-otio", "output", show_default=False)),
+)
+@click.option(
+    "--audio",
+    is_flag=True,
+    flag_value=True,
+    help="Include audio track (default).",
+)
+@click.option(
+    "--no-audio",
+    is_flag=True,
+    flag_value=True,
+    help="Exclude audio track.",
+)
+@click.pass_context
+def save_otio_command(
+    ctx: click.Context,
+    filename: ty.Optional[ty.AnyStr],
+    name: ty.Optional[ty.AnyStr],
+    output: ty.Optional[ty.AnyStr],
+    audio: bool,
+    no_audio: bool,
+):
+    ctx = ctx.obj
+    assert isinstance(ctx, CliContext)
+
+    if audio and no_audio:
+        raise click.BadArgumentUsage("Only one of --audio or --no-audio can be specified.")
+
+    save_otio_args = {
+        "filename": ctx.config.get_value("save-otio", "filename", filename),
+        "name": ctx.config.get_value("save-otio", "name", name),
+        "output": ctx.config.get_value("save-otio", "output", output),
+        "audio": ctx.config.get_value(
+            "save-otio", "audio", True if audio else False if no_audio else None
+        ),
+    }
+    ctx.add_command(cli_commands.save_otio, save_otio_args)
+
+
 # ----------------------------------------------------------------------
-# Commands Omitted From Help List
+# CLI Sub-Command Registration
 # ----------------------------------------------------------------------
 
-# Info Commands
+# Informational
 scenedetect.add_command(about_command)
 scenedetect.add_command(help_command)
 scenedetect.add_command(version_command)
 
-# ----------------------------------------------------------------------
-# Commands Added To Help List
-# ----------------------------------------------------------------------
-
-# Input / Output
-scenedetect.add_command(export_html_command)
-scenedetect.add_command(list_scenes_command)
+# Input
 scenedetect.add_command(load_scenes_command)
-scenedetect.add_command(save_images_command)
-scenedetect.add_command(split_video_command)
 scenedetect.add_command(time_command)
 
-# Detection Algorithms
+# Detectors
 scenedetect.add_command(detect_adaptive_command)
 scenedetect.add_command(detect_content_command)
 scenedetect.add_command(detect_hash_command)
 scenedetect.add_command(detect_hist_command)
 scenedetect.add_command(detect_threshold_command)
+
+# Output
+scenedetect.add_command(list_scenes_command)
+scenedetect.add_command(save_edl_command)
+scenedetect.add_command(save_html_command)
+scenedetect.add_command(save_images_command)
+scenedetect.add_command(save_qp_command)
+scenedetect.add_command(save_xml_command)
+scenedetect.add_command(save_otio_command)
+scenedetect.add_command(split_video_command)
+
+# Deprecated Commands (Hidden From Help Output)
+add_hidden_alias(save_html_command, "export-html")  # Deprecated in v0.6.6, replaced with save-html

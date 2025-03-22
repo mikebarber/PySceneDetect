@@ -1,9 +1,9 @@
 
-.. _scenedetect-frame_timecode:
+.. _scenedetect-common:
 
 ---------------------------------------------------------------
-FrameTimecode
+Common Types
 ---------------------------------------------------------------
 
-.. automodule:: scenedetect.frame_timecode
+.. automodule:: scenedetect.common
    :members:

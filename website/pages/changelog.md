@@ -4,6 +4,73 @@ Releases
 
 ## PySceneDetect 0.6
 
+### PySceneDetect 0.6.6 (March 9, 2025)
+
+#### Release Notes
+
+PySceneDetect v0.6.6 introduces new output formats, which improve compatibility with popular video editors (e.g. DaVinci Resolve).
+
+#### Changelog
+
+ - [feature] New `save-otio` command supports saving scenes in OTIO format [#497](https://github.com/Breakthrough/PySceneDetect/issues/497)
+ - [feature] New `save-edl` command supports saving scenes in EDL format CMX 3600 [#495](https://github.com/Breakthrough/PySceneDetect/issues/495)
+ - [bugfix] Fix incorrect help entries for short-form arguments which suggested invalid syntax [#493](https://github.com/Breakthrough/PySceneDetect/issues/493)
+ - [bugfix] Fix crash when using `split-video` with `-m`/`--mkvmerge` option [#473](https://github.com/Breakthrough/PySceneDetect/issues/473)
+ - [bugfix] Fix incorrect default filename template for `split-video` command with `-m`/`--mkvmerge` option
+ - [bugfix] Fix inconsistent filenames when using `split_video_mkvmerge()`
+ - [bugfix] Ensure auto-rotation is always enabled for `VideoStreamCv2` as workaround for (opencv#26795)[https://github.com/opencv/opencv/issues/26795]
+ - [general] The `export-html` command is now deprecated, use `save-html` instead
+ - [general] Updates to Windows distributions:
+    - av 13.1.0 -> 14.2.0
+    - click 8.1.7 -> 8.1.8
+    - imageio-ffmpeg 0.5.1 -> 0.6.0
+    - moviepy 2.1.1 -> 2.1.2
+    - numpy 2.1.3 -> 2.2.3
+    - opencv-python 4.10.0.84 -> 4.11.0.86
+ - [general] Windows download URLs for standalone ZIP distribution no longer have `portable` suffix
+
+
+### PySceneDetect 0.6.5 (November 24, 2024)
+
+#### Release Notes
+
+This release brings crop support, performance improvements to save-images, lots of bugfixes, and improved compatibility with MoviePy 2.0+.
+
+#### Changelog
+
+ - [feature] Add ability to crop input video before processing [#302](https://github.com/Breakthrough/PySceneDetect/issues/302) [#449](https://github.com/Breakthrough/PySceneDetect/issues/449)
+     - [cli] Add `--crop` option to `scenedetect` command and config file to crop video frames before scene detection
+     - [api] Add `crop` property to `SceneManager` to crop video frames before scene detection
+ - [feature] Add ability to configure CSV separators for rows/columns in config file [#423](https://github.com/Breakthrough/PySceneDetect/issues/423)
+ - [feature] Add new `--show` flag to `export-html` command to launch browser after processing [#442](https://github.com/Breakthrough/PySceneDetect/issues/442)
+ - [improvement] Add new `threading` option to `save-images`/`save_images()` [#456](https://github.com/Breakthrough/PySceneDetect/issues/456)
+    - Enabled by default, offloads image encoding and disk IO to separate threads
+    - Improves performance by up to 50% in some cases
+ - [improvement] The `export-html` command now implicitly invokes `save-images` with default parameters
+    - The output of the `export-html` command will always use the result of the `save-images` command that *precedes* it
+ - [improvement] `save_to_csv` now works with paths from `pathlib`
+ - [api] The `save_to_csv` function now works correctly with paths from the `pathlib` module
+ - [api] Add `col_separator` and `row_separator` args to `write_scene_list` function in `scenedetect.scene_manager`
+ - [api] The MoviePy backend now works with MoviePy 2.0+
+ - [bugfix] Fix `SyntaxWarning` due to incorrect escaping [#400](https://github.com/Breakthrough/PySceneDetect/issues/400)
+ - [bugfix] Fix `ContentDetector` crash when using callbacks [#416](https://github.com/Breakthrough/PySceneDetect/issues/416) [#420](https://github.com/Breakthrough/PySceneDetect/issues/420)
+ - [bugfix] Fix `save-images`/`save_images()` not working correctly with UTF-8 paths [#450](https://github.com/Breakthrough/PySceneDetect/issues/450)
+ - [bugfix] Fix crash when using `save-images`/`save_images()` with OpenCV backend [#455](https://github.com/Breakthrough/PySceneDetect/issues/455)
+ - [bugfix] Fix new detectors not working with `default-detector` config option
+ - [general] Timecodes of the form `MM:SS[.nnn]` are now processed correctly [#443](https://github.com/Breakthrough/PySceneDetect/issues/443)
+ - [general] Updates to Windows distributions:
+    - The MoviePy backend is now included with Windows distributions
+    - Python 3.9 -> Python 3.13
+    - PyAV 10 -> 13.1.0
+    - OpenCV 4.10.0.82 -> 4.10.0.84
+    - Ffmpeg 6.0 -> 7.1
+
+#### Python Distribution Changes
+
+ * *v0.6.5.1* - Fix compatibility issues with PyAV 14+ [#466](https://github.com/Breakthrough/PySceneDetect/issues/466)
+ * *v0.6.5.2* - Fix for `AttributeError: module 'cv2' has no attribute 'Mat'` [#468](https://github.com/Breakthrough/PySceneDetect/issues/466)
+
+
 ### 0.6.4 (June 10, 2024)
 
 #### Release Notes
@@ -581,10 +648,35 @@ Both the Windows installer and portable distributions now include signed executa
 Development
 ==========================================================
 
-## PySceneDetect 0.6.5 (TBD)
+## PySceneDetect 0.7 (In Development)
 
- - [bugfix] Fix new detectors not working with `default-detector` config option
- - [bugfix] Fix `SyntaxWarning` due to incorrect escaping [#400](https://github.com/Breakthrough/PySceneDetect/issues/400)
- - [bugfix] Fix `ContentDetector` crash when using callbacks [#416](https://github.com/Breakthrough/PySceneDetect/issues/416) [#420](https://github.com/Breakthrough/PySceneDetect/issues/420)
- - [general] Timecodes of the form `MM:SS[.nnn]` are now processed correctly [#443](https://github.com/Breakthrough/PySceneDetect/issues/443)
- - [api] The `save_to_csv` function now works correctly with paths from the `pathlib` module
+### CLI Changes
+
+- [feature] WORK IN PROGRESS: New `save-xml` command supports saving scenes in Final Cut Pro format [#156](https://github.com/Breakthrough/PySceneDetect/issues/156)
+
+
+### API Changes
+
+#### Breaking
+
+ * Replace `frame_num` parameter (`int`) with `timecode` (`FrameTimecode`) in `SceneDetector` interface:
+      * The detector interface: `SceneDetector.process_frame()` and `SceneDetector.post_process()`
+      * Statistics: `StatsManager.get_metrics()`, `StatsManager.set_metrics()`, and `StatsManager.metrics_exist()`
+ * Reorganized submodules:
+      * `scenedetect.scene_detector` is now `scenedetect.detector`
+      * `scenedetect.frame_timecode` is now `scenedetect.common`
+ * Remove deprecated module `scenedetect.video_manager`, use [the `scenedetect.open_video()` function](https://www.scenedetect.com/docs/head/api.html#scenedetect.open_video) instead
+ * Remove deprecated parameter `base_timecode` from various functions, there is no need to provide it
+ * Remove deprecated parameter `video_manager` from various functions, use `video` parameter instead
+ * `FrameTimecode` fields `frame_num` and `framerate` are now read-only properties, construct a new `FrameTimecode` to change them
+ * Remove `FrameTimecode.previous_frame()` method
+ * Remove `SceneDetector.is_processing_required()` method, already had no effect in v0.6 as part of deprecation
+ * `SceneDetector` instances can now assume they always have frame data to process when `process_frame` is called
+ * Remove deprecated `SparseSceneDetector` interface
+ * Remove deprecated `SceneManager.get_event_list()` method
+ * Remove deprecated `AdaptiveDetector.get_content_val()` method (the same information can be obtained using a `StatsManager`)
+
+#### Deprecation
+
+ * `scenedetect.scene_detector` module is now deprecated, import from `scenedetect` or `scenedetect.detector` instead
+ * `scenedetect.frame_timecode` module is now deprecated, import from `scenedetect` or `scenedetect.common` instead

@@ -11,7 +11,7 @@ Video Cut Detection and Analysis Tool
 
 ----------------------------------------------------------
 
-### Latest Release: v0.6.4 (June 10, 2024)
+### Latest Release: v0.6.6 (March 9, 2025)
 
 **Website**:  [scenedetect.com](https://www.scenedetect.com)
 
@@ -97,6 +97,10 @@ def split_video_into_scenes(video_path, threshold=27.0):
 ```
 
 See [the documentation](https://www.scenedetect.com/docs/latest/api.html) for more examples.
+
+**Benchmark**:
+
+We evaluate the performance of different detectors in terms of accuracy and processing speed. See the [benchmark report](benchmark/README.md) for details.
 
 ## Reference
 

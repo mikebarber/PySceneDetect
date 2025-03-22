@@ -11,24 +11,19 @@
 #
 """:class:`VideoStreamAv` provides an adapter for the PyAV av.InputContainer object."""
 
+import typing as ty
 from logging import getLogger
-from typing import AnyStr, BinaryIO, Optional, Tuple, Union
 
 import av
 import numpy as np
 
-from scenedetect.frame_timecode import MAX_FPS_DELTA, FrameTimecode
+from scenedetect.common import _USE_PTS_IN_DEVELOPMENT, MAX_FPS_DELTA, FrameTimecode, Timecode
 from scenedetect.platform import get_file_name
 from scenedetect.video_stream import FrameRateUnavailable, VideoOpenFailure, VideoStream
 
 logger = getLogger("pyscenedetect")
 
-VALID_THREAD_MODES = [
-    av.codec.context.ThreadType.NONE,
-    av.codec.context.ThreadType.SLICE,
-    av.codec.context.ThreadType.FRAME,
-    av.codec.context.ThreadType.AUTO,
-]
+VALID_THREAD_MODES = ["NONE", "SLICE", "FRAME", "AUTO"]
 
 
 class VideoStreamAv(VideoStream):
@@ -40,10 +35,10 @@ class VideoStreamAv(VideoStream):
     # calculates the end time.
     def __init__(
         self,
-        path_or_io: Union[AnyStr, BinaryIO],
-        framerate: Optional[float] = None,
-        name: Optional[str] = None,
-        threading_mode: Optional[str] = None,
+        path_or_io: ty.Union[ty.AnyStr, ty.BinaryIO],
+        framerate: ty.Optional[float] = None,
+        name: ty.Optional[str] = None,
+        threading_mode: ty.Optional[str] = None,
         suppress_output: bool = False,
     ):
         """Open a video by path.
@@ -84,13 +79,16 @@ class VideoStreamAv(VideoStream):
 
         self._name = "" if name is None else name
         self._path = ""
-        self._frame = None
+        self._frame: ty.Optional[av.VideoFrame] = None
         self._reopened = True
 
         if threading_mode:
-            threading_mode = threading_mode.upper()
-            if threading_mode not in VALID_THREAD_MODES:
-                raise ValueError("Invalid threading mode! Must be one of: %s" % VALID_THREAD_MODES)
+            try:
+                threading_mode = av.codec.context.ThreadType[threading_mode.upper()]
+            except KeyError as _:
+                raise ValueError(
+                    "Invalid threading mode! Must be one of: %s" % VALID_THREAD_MODES
+                ) from None
 
         if not suppress_output:
             logger.debug("Restoring default ffmpeg log callbacks.")
@@ -149,12 +147,12 @@ class VideoStreamAv(VideoStream):
     """Unique name used to identify this backend."""
 
     @property
-    def path(self) -> Union[bytes, str]:
+    def path(self) -> ty.Union[bytes, str]:
         """Video path."""
         return self._path
 
     @property
-    def name(self) -> Union[bytes, str]:
+    def name(self) -> ty.Union[bytes, str]:
         """Name of the video, without extension."""
         return self._name
 
@@ -164,7 +162,7 @@ class VideoStreamAv(VideoStream):
         return self._io.seekable()
 
     @property
-    def frame_size(self) -> Tuple[int, int]:
+    def frame_size(self) -> ty.Tuple[int, int]:
         """Size of each video frame in pixels as a tuple of (width, height)."""
         return (self._codec_context.width, self._codec_context.height)
 
@@ -184,6 +182,9 @@ class VideoStreamAv(VideoStream):
 
         This can be interpreted as presentation time stamp, thus frame 1 corresponds
         to the presentation time 0.  Returns 0 even if `frame_number` is 1."""
+        if _USE_PTS_IN_DEVELOPMENT:
+            timecode = Timecode(pts=self._frame.pts, time_base=self._frame.time_base)
+            return FrameTimecode(timecode=timecode, fps=self.frame_rate)
         if self._frame is None:
             return self.base_timecode
         return FrameTimecode(round(self._frame.time * self.frame_rate), self.frame_rate)
@@ -201,7 +202,12 @@ class VideoStreamAv(VideoStream):
         """Current position within stream as the frame number.
 
         Will return 0 until the first frame is `read`."""
+
         if self._frame:
+            if _USE_PTS_IN_DEVELOPMENT:
+                return FrameTimecode(
+                    round(self._frame.time * self.frame_rate), self.frame_rate
+                ).frame_num
             return self.position.frame_num + 1
         return 0
 
@@ -221,7 +227,7 @@ class VideoStreamAv(VideoStream):
         frame_aspect_ratio = self.frame_size[0] / self.frame_size[1]
         return display_aspect_ratio / frame_aspect_ratio
 
-    def seek(self, target: Union[FrameTimecode, float, int]) -> None:
+    def seek(self, target: ty.Union[FrameTimecode, float, int]) -> None:
         """Seek to the given timecode. If given as a frame number, represents the current seek
         pointer (e.g. if seeking to 0, the next frame decoded will be the first frame of the video).
 
@@ -265,7 +271,7 @@ class VideoStreamAv(VideoStream):
         except Exception as ex:
             raise VideoOpenFailure() from ex
 
-    def read(self, decode: bool = True, advance: bool = True) -> Union[np.ndarray, bool]:
+    def read(self, decode: bool = True, advance: bool = True) -> ty.Union[np.ndarray, bool]:
         """Read and decode the next frame as a np.ndarray. Returns False when video ends.
 
         Arguments:

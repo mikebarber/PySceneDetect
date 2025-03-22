@@ -40,13 +40,10 @@ import typing as ty
 from dataclasses import dataclass
 from pathlib import Path
 
-from scenedetect.frame_timecode import FrameTimecode
+from scenedetect.common import FrameTimecode, TimecodePair
 from scenedetect.platform import CommandTooLong, Template, get_ffmpeg_path, invoke_command, tqdm
 
 logger = logging.getLogger("pyscenedetect")
-
-TimecodePair = ty.Tuple[FrameTimecode, FrameTimecode]
-"""Named type for pairs of timecodes, which typically represents the start/end of a scene."""
 
 COMMAND_TOO_LONG_STRING = """
 Cannot split video due to too many scenes (resulting command
@@ -157,8 +154,8 @@ def default_formatter(template: str) -> PathFormatter:
 def split_video_mkvmerge(
     input_video_path: str,
     scene_list: ty.Iterable[TimecodePair],
-    output_dir: ty.Optional[Path] = None,
-    output_file_template: str = "$VIDEO_NAME.mkv",
+    output_dir: ty.Optional[ty.Union[str, Path]] = None,
+    output_file_template: ty.Optional[ty.Union[str, Path]] = "$VIDEO_NAME.mkv",
     video_name: ty.Optional[str] = None,
     show_output: bool = False,
     suppress_output=None,
@@ -194,14 +191,8 @@ def split_video_mkvmerge(
     if not scene_list:
         return 0
 
-    logger.info("Splitting video with mkvmerge, output path template:\n  %s", output_file_template)
-    if output_dir:
-        logger.info("Output folder:\n  %s", output_file_template)
-
     if video_name is None:
         video_name = Path(input_video_path).stem
-
-    ret_val = 0
 
     # mkvmerge doesn't support adding scene metadata to filenames. It always adds the scene
     # number prefixed with a dash to the filenames.
@@ -209,27 +200,34 @@ def split_video_mkvmerge(
     output_path = template.safe_substitute(VIDEO_NAME=video_name)
     if output_dir:
         output_path = Path(output_dir) / output_path
+    output_path = Path(output_path)
+    logger.info(f"Splitting video with mkvmerge, path template: {output_path}")
+    # If there is only one scene, mkvmerge omits the suffix for the output. To make the filenames
+    # consistent with the output when there are multiple scenes present, we append "-001".
+    if len(scene_list) == 1:
+        output_path = output_path.with_stem(output_path.stem + "-001")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    call_list = ["mkvmerge"]
+    if not show_output:
+        call_list.append("--quiet")
+    call_list += [
+        "-o",
+        str(output_path),
+        "--split",
+        "parts:%s"
+        % ",".join(
+            [
+                "%s-%s" % (start_time.get_timecode(), end_time.get_timecode())
+                for start_time, end_time in scene_list
+            ]
+        ),
+        input_video_path,
+    ]
+    total_frames = scene_list[-1][1].get_frames() - scene_list[0][0].get_frames()
+    processing_start_time = time.time()
+    ret_val = 0
     try:
-        call_list = ["mkvmerge"]
-        if not show_output:
-            call_list.append("--quiet")
-        call_list += [
-            "-o",
-            str(output_path),
-            "--split",
-            "parts:%s"
-            % ",".join(
-                [
-                    "%s-%s" % (start_time.get_timecode(), end_time.get_timecode())
-                    for start_time, end_time in scene_list
-                ]
-            ),
-            input_video_path,
-        ]
-        total_frames = scene_list[-1][1].get_frames() - scene_list[0][0].get_frames()
-        processing_start_time = time.time()
         # TODO: Capture stdout/stderr and show that if the command fails.
         ret_val = invoke_command(call_list)
         if show_output:

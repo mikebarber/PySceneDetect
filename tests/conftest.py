@@ -28,7 +28,7 @@ Note that currently these tests create some temporary files which are not yet cl
 
 import logging
 import os
-from typing import AnyStr
+import typing as ty
 
 import pytest
 
@@ -37,7 +37,7 @@ import pytest
 #
 
 
-def check_exists(path: AnyStr) -> AnyStr:
+def check_exists(path: ty.AnyStr) -> ty.AnyStr:
     """Returns the absolute path to a (relative) path of a file that
     should exist within the tests/ directory.
 
@@ -86,8 +86,7 @@ def pytest_assertrepr_compare(op, left, right):
 @pytest.fixture(autouse=True)
 def no_logs_gte_error(caplog):
     """Ensure no log messages with error severity or higher were reported during test execution."""
-    # TODO: Remove exclusion for VideoManager module when removed from codebase.
-    EXCLUDED_MODULES = {"video_manager"}
+    EXCLUDED_MODULES = set()
     yield
     errors = [
         record
@@ -107,6 +106,12 @@ def test_video_file() -> str:
 def test_movie_clip() -> str:
     """Movie clip containing fast cuts."""
     return check_exists("tests/resources/goldeneye.mp4")
+
+
+@pytest.fixture
+def test_vfr_video() -> str:
+    """Movie clip containing fast cut, but encoded as variable framerate."""
+    return check_exists("tests/resources/goldeneye-vfr.mp4")
 
 
 @pytest.fixture

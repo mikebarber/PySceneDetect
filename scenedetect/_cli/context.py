@@ -22,7 +22,10 @@ from scenedetect._cli.config import (
     CHOICE_MAP,
     ConfigLoadFailure,
     ConfigRegistry,
+    CropValue,
 )
+from scenedetect.common import MAX_FPS_DELTA, FrameTimecode
+from scenedetect.detector import FlashFilter, SceneDetector
 from scenedetect.detectors import (
     AdaptiveDetector,
     ContentDetector,
@@ -30,9 +33,7 @@ from scenedetect.detectors import (
     HistogramDetector,
     ThresholdDetector,
 )
-from scenedetect.frame_timecode import MAX_FPS_DELTA, FrameTimecode
 from scenedetect.platform import init_logger
-from scenedetect.scene_detector import FlashFilter, SceneDetector
 from scenedetect.scene_manager import Interpolation, SceneManager
 from scenedetect.stats_manager import StatsManager
 from scenedetect.video_splitter import is_ffmpeg_available, is_mkvmerge_available
@@ -84,7 +85,7 @@ class CliContext:
         self.scene_manager: SceneManager = None
         self.stats_manager: StatsManager = None
         self.save_images: bool = False  # True if the save-images command was specified
-        self.save_images_result: ty.Any = (None, None)  # Result of save-images used by export-html
+        self.save_images_result: ty.Any = (None, None)  # Result of save-images used by save-html
 
         # Input:
         self.video_stream: VideoStream = None
@@ -100,7 +101,7 @@ class CliContext:
         self.merge_last_scene: bool = None
         self.min_scene_len: FrameTimecode = None
         self.default_detector: ty.Tuple[ty.Type[SceneDetector], ty.Dict[str, ty.Any]] = None
-        self.output_dir: str = None
+        self.output: str = None
         self.stats_file_path: str = None
 
         # Output Commands (e.g. split-video, save-images):
@@ -110,8 +111,8 @@ class CliContext:
 
     def add_command(self, command: ty.Callable, command_args: ty.Dict[str, ty.Any]):
         """Add `command` to the processing pipeline. Will be called after processing the input."""
-        if "output_dir" in command_args and command_args["output_dir"] is None:
-            command_args["output_dir"] = self.output_dir
+        if "output" in command_args and command_args["output"] is None:
+            command_args["output"] = self.output
         logger.debug("Adding command: %s(%s)", command.__name__, command_args)
         self.commands.append((command, command_args))
 
@@ -157,12 +158,13 @@ class CliContext:
         output: ty.Optional[ty.AnyStr],
         framerate: float,
         stats_file: ty.Optional[ty.AnyStr],
-        downscale: ty.Optional[int],
         frame_skip: int,
         min_scene_len: str,
         drop_short_scenes: ty.Optional[bool],
         merge_last_scene: ty.Optional[bool],
         backend: ty.Optional[str],
+        crop: ty.Optional[ty.Tuple[int, int, int, int]],
+        downscale: ty.Optional[int],
         quiet: bool,
         logfile: ty.Optional[ty.AnyStr],
         config: ty.Optional[ty.AnyStr],
@@ -212,10 +214,10 @@ class CliContext:
                 logger.log(log_level, log_str)
             if init_failure:
                 logger.critical("Error processing configuration file.")
-                raise click.Abort()
+                raise SystemExit(1)
 
         if self.config.config_dict:
-            logger.debug("Current configuration:\n%s", str(self.config.config_dict))
+            logger.debug("Current configuration:\n%s", str(self.config.config_dict).encode("utf-8"))
 
         logger.debug("Parsing program options.")
         if stats is not None and frame_skip:
@@ -236,9 +238,9 @@ class CliContext:
         # Load the input video to obtain a time base for parsing timecodes.
         self._open_video_stream(input_path, framerate, backend)
 
-        self.output_dir = self.config.get_value("global", "output", output)
-        if self.output_dir:
-            logger.debug("Output directory set:\n  %s", self.output_dir)
+        self.output = self.config.get_value("global", "output", output)
+        if self.output:
+            logger.debug("Output directory set:\n  %s", self.output)
 
         self.min_scene_len = self.parse_timecode(
             min_scene_len
@@ -285,8 +287,22 @@ class CliContext:
                 scene_manager.downscale = downscale
             except ValueError as ex:
                 logger.debug(str(ex))
-                raise click.BadParameter(str(ex), param_hint="downscale factor") from None
+                raise click.BadParameter(str(ex), param_hint="downscale factor") from ex
         scene_manager.interpolation = self.config.get_value("global", "downscale-method")
+
+        # If crop was set, make sure it's valid (e.g. it should cover at least a single pixel).
+        try:
+            crop = self.config.get_value("global", "crop", CropValue(crop))
+            if crop is not None:
+                (min_x, min_y) = crop[0:2]
+                frame_size = self.video_stream.frame_size
+                if min_x >= frame_size[0] or min_y >= frame_size[1]:
+                    region = CropValue(crop)
+                    raise ValueError(f"{region} is outside of video boundary of {frame_size}")
+                scene_manager.crop = crop
+        except ValueError as ex:
+            logger.debug(str(ex))
+            raise click.BadParameter(str(ex), param_hint="--crop") from ex
 
         self.scene_manager = scene_manager
 
@@ -318,6 +334,8 @@ class CliContext:
             try:
                 weights = ContentDetector.Components(*weights)
             except ValueError as ex:
+                if __debug__:
+                    raise
                 logger.debug(str(ex))
                 raise click.BadParameter(str(ex), param_hint="weights") from None
 
@@ -373,6 +391,8 @@ class CliContext:
             try:
                 weights = ContentDetector.Components(*weights)
             except ValueError as ex:
+                if __debug__:
+                    raise
                 logger.debug(str(ex))
                 raise click.BadParameter(str(ex), param_hint="weights") from None
         return {
@@ -545,20 +565,31 @@ class CliContext:
                     framerate=framerate,
                     backend=backend,
                 )
-            logger.debug("Video opened using backend %s", type(self.video_stream).__name__)
+            logger.debug(f"""Video information:
+  Backend:      {type(self.video_stream).__name__}
+  Resolution:   {self.video_stream.frame_size}
+  Framerate:    {self.video_stream.frame_rate}
+  Duration:     {self.video_stream.duration} ({self.video_stream.duration.frame_num} frames)""")
+
         except FrameRateUnavailable as ex:
+            if __debug__:
+                raise
             raise click.BadParameter(
                 "Failed to obtain framerate for input video. Manually specify framerate with the"
                 " -f/--framerate option, or try re-encoding the file.",
                 param_hint="-i/--input",
             ) from ex
         except VideoOpenFailure as ex:
+            if __debug__:
+                raise
             raise click.BadParameter(
                 "Failed to open input video%s: %s"
                 % (" using %s backend" % backend if backend else "", str(ex)),
                 param_hint="-i/--input",
             ) from ex
         except OSError as ex:
+            if __debug__:
+                raise
             raise click.BadParameter(
                 "Input error:\n\n\t%s\n" % str(ex), param_hint="-i/--input"
             ) from None
